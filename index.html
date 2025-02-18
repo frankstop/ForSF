@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Infinite Arena</title>
+  <style>
+    body { 
+      margin: 0; 
+      background: #111; 
+      color: #fff; 
+      font-family: Arial, sans-serif; 
+      overflow: hidden;
+    }
+    #gameCanvas { 
+      display: block; 
+      background: #222; 
+      margin: 0 auto; 
+    }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    #upgradeMenu {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      border: 1px solid #fff;
+      display: none;
+    }
+    button {
+      margin: 5px;
+      padding: 5px 10px;
+      background: #444;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #666;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  
+  <div id="ui">
+    <div>Score: <span id="scoreDisplay">0</span></div>
+    <div>Health: <span id="healthDisplay">100</span></div>
+    <button id="toggleUpgrade">Upgrade</button>
+  </div>
+  
+  <div id="upgradeMenu">
+    <div><strong>Upgrade Menu</strong></div>
+    <div>Points: <span id="pointsDisplay">0</span></div>
+    <button data-upgrade="fireRate">
+      Increase Fire Rate (Cost: <span id="fireRateCost">10</span>)
+    </button>
+    <button data-upgrade="damage">
+      Increase Damage (Cost: <span id="damageCost">10</span>)
+    </button>
+    <button id="closeUpgrade">Close</button>
+  </div>
+
+  <script>
+    // Get canvas and UI elements
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const healthDisplay = document.getElementById('healthDisplay');
+    const pointsDisplay = document.getElementById('pointsDisplay');
+    const fireRateCostDisplay = document.getElementById('fireRateCost');
+    const damageCostDisplay = document.getElementById('damageCost');
+
+    // Global game variables
+    let score = 0;
+    let points = 0;
+    let lastTime = 0;
+    let enemySpawnTimer = 0;
+    let enemySpawnInterval = 2000; // initial spawn interval (ms)
+    let upgradeMenuOpen = false;
+
+    // Player definition (stays near the center)
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      radius: 20,
+      health: 100,
+      maxHealth: 100,
+      angle: 0,
+      fireRate: 500, // time between shots in ms
+      lastShot: 0,
+      damage: 10,
+      projectiles: [],
+      dashCooldown: 2000,
+      lastDash: -2000,
+      dashDistance: 50,
+      upgrade: {
+        fireRateCost: 10,
+        damageCost: 10
+      },
+      update: function(delta) {
+        // Update all active projectiles
+        for (let i = this.projectiles.length - 1; i >= 0; i--) {
+          const proj = this.projectiles[i];
+          proj.update(delta);
+          // Remove if off-screen
+          if (
+            proj.x < 0 || proj.x > canvas.width ||
+            proj.y < 0 || proj.y > canvas.height
+          ) {
+            this.projectiles.splice(i, 1);
+          }
+        }
+      },
+      render: function() {
+        // Draw the player as a circle
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw a line indicating the facing direction
+        const lineX = this.x + Math.cos(this.angle) * this.radius;
+        const lineY = this.y + Math.sin(this.angle) * this.radius;
+        ctx.strokeStyle = 'red';
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(lineX, lineY);
+        ctx.stroke();
+
+        // Render each projectile
+        this.projectiles.forEach(p => p.render());
+      },
+      shoot: function() {
+        const now = Date.now();
+        if (now - this.lastShot > this.fireRate) {
+          // Create a new projectile in the current facing direction
+          const proj = new Projectile(this.x, this.y, this.angle, this.damage);
+          this.projectiles.push(proj);
+          this.lastShot = now;
+        }
+      },
+      dash: function() {
+        const now = Date.now();
+        if (now - this.lastDash > this.dashCooldown) {
+          // Dash moves the player in the direction they are facing
+          this.x += Math.cos(this.angle) * this.dashDistance;
+          this.y += Math.sin(this.angle) * this.dashDistance;
+          // Clamp position within canvas bounds
+          this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
+          this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
+          this.lastDash = now;
+        }
+      }
+    };
+
+    // Projectile class for the player's bullets
+    class Projectile {
+      constructor(x, y, angle, damage) {
+        this.x = x;
+        this.y = y;
+        this.angle = angle;
+        this.speed = 400; // pixels per second
+        this.radius = 5;
+        this.damage = damage;
+      }
+      update(delta) {
+        this.x += Math.cos(this.angle) * this.speed * (delta / 1000);
+        this.y += Math.sin(this.angle) * this.speed * (delta / 1000);
+      }
+      render() {
+        ctx.fillStyle = 'yellow';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Enemy class representing foes approaching the player
+    class Enemy {
+      constructor(x, y, type = 'grunt') {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.radius = 15;
+        this.speed = 50;
+        this.health = 20;
+        // Adjust enemy properties based on type
+        if (type === 'speedster') {
+          this.speed = 100;
+          this.health = 10;
+          this.radius = 12;
+        } else if (type === 'tank') {
+          this.speed = 30;
+          this.health = 50;
+          this.radius = 25;
+        }
+      }
+      update(delta) {
+        // Move toward the player (always head to the center)
+        const dx = player.x - this.x;
+        const dy = player.y - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const moveDist = this.speed * (delta / 1000);
+        this.x += (dx / dist) * moveDist;
+        this.y += (dy / dist) * moveDist;
+      }
+      render() {
+        ctx.fillStyle = 'lime';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    let enemies = [];
+
+    // Input handling
+    let keys = {};
+    document.addEventListener('keydown', function(e) {
+      keys[e.key] = true;
+      if (e.key === ' ') {
+        // Spacebar to shoot
+        player.shoot();
+      }
+      if (e.key === 'Shift') {
+        // Shift to dash
+        player.dash();
+      }
+    });
+    document.addEventListener('keyup', function(e) {
+      keys[e.key] = false;
+    });
+
+    // Mouse movement controls the aiming direction
+    canvas.addEventListener('mousemove', function(e) {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      player.angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+    });
+
+    // Toggle the upgrade menu
+    document.getElementById('toggleUpgrade').addEventListener('click', function() {
+      upgradeMenuOpen = true;
+      document.getElementById('upgradeMenu').style.display = 'block';
+      updateUpgradeUI();
+    });
+    document.getElementById('closeUpgrade').addEventListener('click', function() {
+      upgradeMenuOpen = false;
+      document.getElementById('upgradeMenu').style.display = 'none';
+    });
+    // Upgrade button actions
+    document.querySelectorAll('#upgradeMenu button[data-upgrade]').forEach(button => {
+      button.addEventListener('click', function() {
+        const upgradeType = button.getAttribute('data-upgrade');
+        if (upgradeType === 'fireRate') {
+          if (points >= player.upgrade.fireRateCost) {
+            points -= player.upgrade.fireRateCost;
+            // Reduce the delay between shots (minimum of 100ms)
+            player.fireRate = Math.max(100, player.fireRate - 50);
+            player.upgrade.fireRateCost = Math.floor(player.upgrade.fireRateCost * 1.5);
+          }
+        } else if (upgradeType === 'damage') {
+          if (points >= player.upgrade.damageCost) {
+            points -= player.upgrade.damageCost;
+            // Increase damage per projectile
+            player.damage += 5;
+            player.upgrade.damageCost = Math.floor(player.upgrade.damageCost * 1.5);
+          }
+        }
+        updateUpgradeUI();
+      });
+    });
+
+    function updateUpgradeUI() {
+      pointsDisplay.textContent = points;
+      fireRateCostDisplay.textContent = player.upgrade.fireRateCost;
+      damageCostDisplay.textContent = player.upgrade.damageCost;
+    }
+
+    // Simple circle collision detection
+    function checkCollision(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      return distance < a.radius + b.radius;
+    }
+
+    // Main game loop using requestAnimationFrame
+    function gameLoop(timestamp) {
+      const delta = timestamp - lastTime;
+      lastTime = timestamp;
+      update(delta);
+      render();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Update game state
+    function update(delta) {
+      if (player.health <= 0) {
+        // End the game when health runs out
+        alert("Game Over! Your score: " + score);
+        document.location.reload();
+        return;
+      }
+      player.update(delta);
+
+      // Gradually spawn enemies based on a timer
+      enemySpawnTimer += delta;
+      if (enemySpawnTimer > enemySpawnInterval) {
+        spawnEnemy();
+        enemySpawnTimer = 0;
+        // Increase difficulty by reducing spawn interval (minimum 500ms)
+        enemySpawnInterval = Math.max(500, enemySpawnInterval - 10);
+      }
+
+      // Update enemies and check collisions
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const enemy = enemies[i];
+        enemy.update(delta);
+        // If enemy collides with the player, damage the player
+        if (checkCollision(enemy, player)) {
+          player.health -= 5;
+          enemies.splice(i, 1);
+          continue;
+        }
+        // Check for projectile collisions with the enemy
+        for (let j = player.projectiles.length - 1; j >= 0; j--) {
+          const proj = player.projectiles[j];
+          if (checkCollision(enemy, proj)) {
+            enemy.health -= proj.damage;
+            player.projectiles.splice(j, 1);
+            if (enemy.health <= 0) {
+              score += 10;
+              points += 10;
+              enemies.splice(i, 1);
+              break;
+            }
+          }
+        }
+      }
+
+      // Update UI values
+      scoreDisplay.textContent = score;
+      healthDisplay.textContent = player.health;
+    }
+
+    // Render game objects
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+      player.render();
+      enemies.forEach(enemy => enemy.render());
+    }
+
+    // Draw a simple grid background
+    function drawGrid() {
+      ctx.strokeStyle = '#333';
+      for (let x = 0; x < canvas.width; x += 50) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    }
+
+    // Randomly spawn an enemy along one of the canvas edges
+    function spawnEnemy() {
+      let x, y;
+      const edge = Math.floor(Math.random() * 4);
+      if (edge === 0) { // top
+        x = Math.random() * canvas.width;
+        y = -20;
+      } else if (edge === 1) { // right
+        x = canvas.width + 20;
+        y = Math.random() * canvas.height;
+      } else if (edge === 2) { // bottom
+        x = Math.random() * canvas.width;
+        y = canvas.height + 20;
+      } else { // left
+        x = -20;
+        y = Math.random() * canvas.height;
+      }
+      // Choose enemy type based on chance
+      let type = 'grunt';
+      const rand = Math.random();
+      if (rand < 0.2) type = 'speedster';
+      else if (rand > 0.8) type = 'tank';
+      const enemy = new Enemy(x, y, type);
+      enemies.push(enemy);
+    }
+
+    // Start the game loop
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
