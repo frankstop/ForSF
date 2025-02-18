@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Infinite Arena</title>
+  <title>Infinite Arena - Mobile Controls</title>
   <style>
     body { 
       margin: 0; 
@@ -10,6 +10,7 @@
       color: #fff; 
       font-family: Arial, sans-serif; 
       overflow: hidden;
+      touch-action: none; /* Prevents default touch behaviors */
     }
     #gameCanvas { 
       display: block; 
@@ -30,6 +31,7 @@
       padding: 10px;
       border: 1px solid #fff;
       display: none;
+      z-index: 10;
     }
     button {
       margin: 5px;
@@ -41,6 +43,30 @@
     }
     button:hover {
       background: #666;
+    }
+    /* Mobile on-screen controls */
+    #mobileControls {
+      position: absolute;
+      bottom: 20px;
+      width: 100%;
+      z-index: 20;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 20px;
+      pointer-events: none; /* Allow touches to pass through unless on a button */
+    }
+    .mobile-button {
+      background: rgba(0,0,0,0.7);
+      border: 2px solid #fff;
+      border-radius: 50%;
+      width: 80px;
+      height: 80px;
+      color: #fff;
+      font-size: 16px;
+      text-align: center;
+      line-height: 80px;
+      pointer-events: auto; /* Make buttons clickable */
+      user-select: none;
     }
   </style>
 </head>
@@ -63,6 +89,12 @@
       Increase Damage (Cost: <span id="damageCost">10</span>)
     </button>
     <button id="closeUpgrade">Close</button>
+  </div>
+
+  <!-- Mobile on-screen controls -->
+  <div id="mobileControls">
+    <div class="mobile-button" id="dashButton">Dash</div>
+    <div class="mobile-button" id="shootButton">Shoot</div>
   </div>
 
   <script>
@@ -219,7 +251,7 @@
 
     let enemies = [];
 
-    // Input handling
+    // Input handling for keyboard (for desktop)
     let keys = {};
     document.addEventListener('keydown', function(e) {
       keys[e.key] = true;
@@ -236,13 +268,23 @@
       keys[e.key] = false;
     });
 
-    // Mouse movement controls the aiming direction
+    // Mouse movement controls the aiming direction (desktop)
     canvas.addEventListener('mousemove', function(e) {
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       player.angle = Math.atan2(mouseY - player.y, mouseX - player.x);
     });
+
+    // Touch controls for aiming on mobile
+    canvas.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const touchX = touch.clientX - rect.left;
+      const touchY = touch.clientY - rect.top;
+      player.angle = Math.atan2(touchY - player.y, touchX - player.x);
+    }, {passive: false});
 
     // Toggle the upgrade menu
     document.getElementById('toggleUpgrade').addEventListener('click', function() {
@@ -282,6 +324,16 @@
       fireRateCostDisplay.textContent = player.upgrade.fireRateCost;
       damageCostDisplay.textContent = player.upgrade.damageCost;
     }
+
+    // Mobile on-screen control button events
+    document.getElementById('shootButton').addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      player.shoot();
+    });
+    document.getElementById('dashButton').addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      player.dash();
+    });
 
     // Simple circle collision detection
     function checkCollision(a, b) {
